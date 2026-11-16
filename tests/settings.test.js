@@ -14,6 +14,45 @@ function setup(storage = new Map(), userId = 'test-user') {
         setSaved: value => { saved = value; }, saves: () => saves };
 }
 
+test('the legacy combined switch migrates without overriding saved independent switches', () => {
+    for (const enabled of [false, true]) {
+        const settings = normalizeSettings({ enabled, maxRetries: 7, notifySuccess: false });
+        assert.equal(settings.retryEnabled, enabled);
+        assert.equal(settings.notificationsEnabled, enabled);
+        assert.equal(settings.maxRetries, 7);
+        assert.equal(settings.notifySuccess, false);
+        assert.equal(Object.hasOwn(settings, 'enabled'), false);
+        const independent = normalizeSettings({ enabled, retryEnabled: !enabled, notificationsEnabled: !enabled });
+        assert.equal(independent.retryEnabled, !enabled);
+        assert.equal(independent.notificationsEnabled, !enabled);
+    }
+});
+
+test('independent switches and retry preferences survive refresh and server confirmation', async () => {
+    const local = new Map(), before = setup(local);
+    const next = before.store.update({ ...normalizeSettings(), retryEnabled: false, notificationsEnabled: true, maxRetries: 7 });
+    const after = setup(local);
+    assert.deepEqual(after.store.restore(), next);
+    after.setSaved(next);
+    await after.store.confirm();
+    assert.equal(local.size, 0);
+    assert.deepEqual(after.store.read(), next);
+});
+
+test('pending edits from the combined switch survive an upgrade and refresh', () => {
+    for (const enabled of [false, true]) {
+        const local = new Map([['st-generation-retry:pending:test-user', JSON.stringify({ enabled, maxRetries: 7 })]]);
+        const h = setup(local);
+        h.context.extensionSettings.generation_retry = { enabled: !enabled, notifyFailure: false };
+        const settings = h.store.restore();
+        assert.equal(settings.retryEnabled, enabled);
+        assert.equal(settings.notificationsEnabled, enabled);
+        assert.equal(settings.maxRetries, 7);
+        assert.equal(settings.notifyFailure, false);
+        assert.equal(JSON.parse(local.values().next().value).enabled, undefined);
+    }
+});
+
 test('a pending edit survives reload before native debounced save executes', () => {
     const local = new Map(), before = setup(local);
     before.store.update({ ...normalizeSettings(), maxRetries: 7, notifySuccess: false });

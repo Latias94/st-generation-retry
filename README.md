@@ -12,7 +12,7 @@ https://github.com/Latias94/st-generation-retry
 
 Requires SillyTavern 1.13.0 or later. No server plugin, Node package installation, API key, or core patch is needed.
 
-Open **Extensions → 自动重试与通知** to configure the extension. It is enabled by default. Select **授权桌面通知** to request permission, allow notifications in the browser, and then select **测试通知**. Permission is requested only after that button is pressed. Notification text never includes character names, prompts, reasoning, or reply content.
+Open **Extensions → 自动重试与通知** to configure the extension. **启用自动重试** and **启用结果通知** are independent switches, both on by default. For notifications without retries, turn off **启用自动重试** and leave **启用结果通知** on; your retry limit and delays are retained. Select **授权桌面通知** to request permission, allow notifications in the browser, and then select **测试通知**. Permission is requested only after that button is pressed. Notification text never includes character names, prompts, reasoning, or reply content.
 
 Browsers require HTTPS or a localhost origin for desktop notifications. For a local server, use `http://localhost:8000` or `http://127.0.0.1:8000`. A plain HTTP LAN address does not qualify. If permission is denied, unavailable, or delivery fails or has no browser receipt within five seconds, the extension uses a SillyTavern toast. Browser and operating system notification settings still control delivery. Keep the SillyTavern page open while generating.
 
@@ -24,8 +24,9 @@ The panel identifies the exact current origin. `localhost` and `127.0.0.1`, diff
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
-| Enable retry and notifications | On | Enables both features for future native Chat Completion generations. |
-| Maximum retries | 3 | Additional attempts after the original request; range 0–10. Set to 0 for notifications without retries. |
+| Enable automatic retry | On | Retries temporary native Chat Completion failures. Turning this off still allows result notifications. |
+| Enable result notifications | On | Sends the selected success/failure notifications, independently of automatic retry. Turning this off also disables result toasts; the explicit test button still works. |
+| Maximum retries | 3 | Additional attempts after the original request; range 0–10. Applies only when automatic retry is on; 0 also disables retries. |
 | Initial delay | 2 seconds | Delay before the first retry; range 1–300 seconds. |
 | Exponential backoff | On | Doubles the delay for each retry. |
 | Maximum delay | 30 seconds | Caps the delay, including `Retry-After`; range 1–900 seconds and never below the initial delay. |
@@ -36,7 +37,7 @@ The panel identifies the exact current origin. `localhost` and `127.0.0.1`, diff
 
 The status area displays preparation, active requests, retry delays, and the final result. **停止本次生成 / 重试** cancels the generation and any pending retry. The native SillyTavern stop button works as well. Manual cancellation sends no success or failure notification.
 
-Settings are saved in SillyTavern's user settings. Valid input is also recorded immediately as a pending patch in `sessionStorage`, scoped to the current tab, origin, and SillyTavern account, so refreshing before the native debounced save completes does not discard the edit. The patch contains only changed extension options; it is replayed on reload and removed after a matching server readback. Tabs keep independent pending patches. The panel distinguishes temporary tab storage, pending synchronization, and confirmed server storage. Wait for confirmation before closing the tab. If browser storage is blocked, it warns that synchronization must finish before reloading. Editing retry limits takes effect on the next request; disabling the extension also stops its active generation.
+Settings are saved in SillyTavern's user settings. Valid input is also recorded immediately as a pending patch in `sessionStorage`, scoped to the current tab, origin, and SillyTavern account, so refreshing before the native debounced save completes does not discard the edit. The patch contains only changed extension options; it is replayed on reload and removed after a matching server readback. Tabs keep independent pending patches. The panel distinguishes temporary tab storage, pending synchronization, and confirmed server storage. Wait for confirmation before closing the tab. If browser storage is blocked, it warns that synchronization must finish before reloading. Changes to retry options take effect on the next request; notification options are checked when generation finishes. Turning both switches off also stops the extension's active generation. The old combined switch migrates to both independent switches, preserving its on/off state and all existing retry and notification preferences.
 
 ## Supported requests
 
@@ -55,7 +56,7 @@ The extension repeats the **same serialized HTTP request** within the original n
 
 Before a stream emits any output, temporary failures and empty streams can be retried. Once text, reasoning, an image, or a tool call has reached SillyTavern, a subsequent interruption is reported as a final failure without replaying the request. Any partial reply remains available for the user to inspect. A missing completion marker is treated as an interrupted stream. Supported markers include `[DONE]`, finish reasons for every requested choice, Anthropic `message_stop`/`stop_reason`, and Cohere `message-end`.
 
-Stopping generation, changing chats, changing the API/model/profile, or disabling the extension cancels pending work. Retry checks also verify the chat and connection identity before sending the next request. A network error cannot prove whether an upstream service already processed or billed a request; retries remain subject to the provider's usage policy.
+Stopping generation, changing chats, changing the API/model/profile, or turning both switches off cancels pending work. Retry checks also verify the chat and connection identity before sending the next request. A network error cannot prove whether an upstream service already processed or billed a request; retries remain subject to the provider's usage policy.
 
 Desktop notification success reflects the native generation reaching its end after a valid upstream result. The extension waits for native streaming finalization, saving, and tool execution before settling the result; reported tool errors or unhandled tool calls produce a failure notification. It does not verify downstream third-party rendering scripts, durable file storage, or tool execution side effects.
 

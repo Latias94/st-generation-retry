@@ -64,3 +64,24 @@ test('permission information names the exact origin and does not request permiss
     assert.equal(h.notifier.details().origin, 'http://127.0.0.1:8000');
     assert.equal(h.toasts[0][1].includes('127.0.0.1:8000'), true);
 });
+
+test('the notification switch suppresses both desktop and fallback notifications without disabling retry', async () => {
+    for (const mode of ['show', 'error']) {
+        const h = setup(mode);
+        for (const outcome of ['success', 'failure']) {
+            await h.notifier.publish({ outcome, id: 1 }, normalizeSettings({ retryEnabled: true, notificationsEnabled: false }));
+        }
+        assert.equal(h.sent.length, 0);
+        assert.equal(h.toasts.length, 0);
+        assert.equal(h.statuses.length, 0);
+    }
+});
+
+test('success and failure desktop notifications remain enabled with retry switched off', async () => {
+    const h = setup('show');
+    for (const outcome of ['success', 'failure']) {
+        await h.notifier.publish({ outcome, id: 1 }, normalizeSettings({ retryEnabled: false, notificationsEnabled: true }));
+    }
+    assert.equal(h.sent.length, 2);
+    assert.equal(h.toasts.length, 0);
+});

@@ -82,7 +82,7 @@ function initialize() {
             settings: getSettings(), notifier,
             onChange(value) {
                 const next = store.update(value), context = getContext();
-                if (!next.enabled && controller.cancel('disabled')) context.stopGeneration();
+                if (!next.retryEnabled && !next.notificationsEnabled && controller.cancel('disabled')) context.stopGeneration();
                 return next;
             },
             onCancel() { getContext().stopGeneration(); controller.cancel(); },

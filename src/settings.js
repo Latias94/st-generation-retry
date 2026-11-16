@@ -50,7 +50,9 @@ export function createSettingsStore({ getContext, storage, userId, readSaved, on
                 const value = JSON.parse(storage.getItem(key) ?? '{}');
                 if (value && typeof value === 'object' && !Array.isArray(value)) {
                     const normalized = normalizeSettings(value);
-                    pending = Object.fromEntries(Object.keys(DEFAULT_SETTINGS).filter(name => Object.hasOwn(value, name)).map(name => [name, normalized[name]]));
+                    const names = Object.keys(DEFAULT_SETTINGS).filter(name => Object.hasOwn(value, name));
+                    if (typeof value.enabled === 'boolean') names.push('retryEnabled', 'notificationsEnabled');
+                    pending = Object.fromEntries(names.map(name => [name, normalized[name]]));
                 }
             } catch { /* Invalid or blocked local storage must not prevent native settings loading. */ }
             if (!Object.keys(pending).length) return read();

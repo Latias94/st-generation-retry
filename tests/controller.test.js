@@ -3,8 +3,9 @@ import { test } from 'node:test';
 import { createRetryController } from '../src/controller.js';
 import { GenerationFailure, normalizeSettings, retryDelay } from '../src/policy.js';
 import { createNotifier } from '../src/notifications.js';
+import { requestWithRetry } from '../src/transport.js';
 
-function setup() {
+function setup(request) {
     const context = { chatId: 'test', characterId: 1, mainApi: 'openai', chatCompletionSettings: {} };
     const jobs = new Map(), outcomes = [], sessions = [], statuses = [];
     const settings = normalizeSettings();
@@ -13,7 +14,7 @@ function setup() {
         getContext: () => context, getSettings: () => settings,
         isHostBusy: () => busy,
         onOutcome: value => outcomes.push(value), onStatus: value => statuses.push(value),
-        request: async (...args) => { sessions.push(args[4]); return Response.json({}); },
+        request: async (...args) => { sessions.push(args[4]); return request ? request(...args) : Response.json({}); },
         schedule: callback => { const id = ++serial; jobs.set(id, callback); return id; },
         unschedule: id => jobs.delete(id),
     });
@@ -91,7 +92,7 @@ test('group member replies produce one result at the end of the group wrapper', 
 test('quiet, dry-run, disabled, external, and unrelated requests pass through', async () => {
     for (const mode of ['quiet', 'dry', 'disabled', 'external', 'status']) {
         const h = setup();
-        if (mode === 'disabled') h.settings.enabled = false;
+        if (mode === 'disabled') h.settings.retryEnabled = h.settings.notificationsEnabled = false;
         h.controller.start(mode === 'quiet' ? 'quiet' : 'normal', {}, mode === 'dry');
         const response = await h.fetch(mode === 'quiet' ? { type: 'quiet' } : {},
             mode === 'external' ? '/api/other/generate' : mode === 'status' ? '/api/backends/chat-completions/status' : undefined);
@@ -131,11 +132,44 @@ test('normalizes persisted settings and caps exponential backoff and Retry-After
     const settings = normalizeSettings({ maxRetries: 100, delaySeconds: -4, enabled: 'true', maxDelaySeconds: 10 });
     assert.equal(settings.maxRetries, 10);
     assert.equal(settings.delaySeconds, 1);
-    assert.equal(settings.enabled, true);
+    assert.equal(settings.retryEnabled, true);
+    assert.equal(settings.notificationsEnabled, true);
     assert.equal(retryDelay(settings, 2, '5'), 5000);
     assert.equal(retryDelay(settings, 10, '600'), 10000);
     assert.equal(retryDelay(settings, 2, 'bad'), 2000);
 });
+
+for (const retryEnabled of [false, true]) {
+    for (const notificationsEnabled of [false, true]) {
+        for (const success of [false, true]) {
+            test(`independent switches: retry=${retryEnabled}, notifications=${notificationsEnabled}, success=${success}`, async () => {
+                const h = setup((...args) => requestWithRetry(...args, { sleep: async () => {} }));
+                Object.assign(h.settings, { retryEnabled, notificationsEnabled, maxRetries: 1 });
+                let calls = 0;
+                const data = { type: 'normal', stream: false };
+                h.controller.start();
+                h.controller.requestReady(data);
+                const response = h.controller.fetch(async () => {
+                    calls++;
+                    return success ? Response.json({ choices: [{ message: { content: 'Test reply.' } }] })
+                        : Response.json({ error: 'busy' }, { status: 503 });
+                }, '/api/backends/chat-completions/generate', { method: 'POST', body: JSON.stringify(data) });
+                if (!success && (retryEnabled || notificationsEnabled)) await assert.rejects(response, { code: 'upstream-error' });
+                else await response;
+                h.controller.rendered();
+                h.controller.end();
+                h.flush();
+                assert.equal(calls, !success && retryEnabled ? 2 : 1);
+                assert.equal(h.statuses.some(status => status.phase === 'waiting'), !success && retryEnabled);
+                assert.deepEqual(h.outcomes.map(result => result.outcome), retryEnabled || notificationsEnabled ? [success ? 'success' : 'failure'] : []);
+                const toasts = [];
+                const notifier = createNotifier({ environment: {}, toast: (...args) => toasts.push(args) });
+                for (const result of h.outcomes) await notifier.publish(result, h.settings);
+                assert.deepEqual(toasts.map(([kind]) => kind), notificationsEnabled ? [success ? 'success' : 'error'] : []);
+            });
+        }
+    }
+}
 
 test('a new normal generation does not inherit a previous completed failure', async () => {
     const h = setup();

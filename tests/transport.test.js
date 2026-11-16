@@ -194,6 +194,22 @@ test('zero retries preserves failure notifications without resending', async () 
     assert.deepEqual(harness.results.map(x => x[0]), ['failure']);
 });
 
+test('disabling retry never resends HTTP, network, empty, or SSE failures even with a positive retry limit', async () => {
+    for (const [response, stream, code] of [
+        [Response.json({ error: true }, { status: 503 }), false, 'upstream-error'],
+        [new TypeError('Failed to fetch'), false, 'network-error'],
+        [Response.json({ choices: [] }), false, 'empty-response'],
+        [sse(frame({ error: { message: 'overloaded' } })), true, 'upstream-error'],
+        [sse(frame('[DONE]')), true, 'empty-response'],
+    ]) {
+        const h = setup([response, ok()], { retryEnabled: false, maxRetries: 7 });
+        await assert.rejects(async () => { await (await h.run(stream)).text(); }, { code });
+        assert.equal(h.calls.length, 1);
+        assert.deepEqual(h.waits, []);
+        assert.deepEqual(h.results.map(result => result[0]), ['failure']);
+    }
+});
+
 test('a caller cancelling a returned stream aborts its upstream reader', async () => {
     let cancelled = false;
     const harness = setup([new Response(new ReadableStream({ cancel() { cancelled = true; } }), { headers: { 'content-type': 'text/event-stream' } })]);

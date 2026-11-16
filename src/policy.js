@@ -1,5 +1,6 @@
 export const DEFAULT_SETTINGS = Object.freeze({
-    enabled: true,
+    retryEnabled: true,
+    notificationsEnabled: true,
     maxRetries: 3,
     delaySeconds: 2,
     exponentialBackoff: true,
@@ -15,6 +16,12 @@ export function normalizeSettings(value = {}) {
     const result = { ...DEFAULT_SETTINGS };
     for (const key of Object.keys(result)) {
         if (typeof result[key] === 'boolean' && typeof value[key] === 'boolean') result[key] = value[key];
+    }
+    // Preserve the old combined switch unless an independent switch has been saved.
+    if (typeof value.enabled === 'boolean') {
+        for (const key of ['retryEnabled', 'notificationsEnabled']) {
+            if (typeof value[key] !== 'boolean') result[key] = value.enabled;
+        }
     }
     for (const [key, min, max] of [['maxRetries', 0, 10], ['delaySeconds', 1, 300], ['maxDelaySeconds', 1, 900]]) {
         const number = Number(value[key] ?? result[key]);

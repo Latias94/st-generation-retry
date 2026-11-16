@@ -31,7 +31,7 @@ export async function requestWithRetry(fetcher, input, init, payload, session, {
         check();
         const failure = networkFailure(error);
         failure.partial ||= partial;
-        if (failure.name === 'AbortError' || partial || !failure.retryable || retries >= settings.maxRetries) throw failure;
+        if (!settings.retryEnabled || failure.name === 'AbortError' || partial || !failure.retryable || retries >= settings.maxRetries) throw failure;
         const milliseconds = retryDelay(settings, ++retries, retryAfter);
         session.onRetry({ retry: retries, milliseconds, code: failure.code, status: failure.status });
         await sleep(milliseconds, controller.signal);

@@ -13,6 +13,7 @@ function contextKey(context) {
 export function createRetryController({ getContext, getSettings, onStatus = () => {}, onOutcome = () => {},
     isHostBusy = () => false, request = requestWithRetry, schedule = setTimeout, unschedule = clearTimeout }) {
     let active, wrapper, serial = 0, timer;
+    const enabled = () => getSettings().retryEnabled || getSettings().notificationsEnabled;
     const clearTimer = () => { unschedule(timer); timer = undefined; };
     const current = run => active === run && !run.abort.signal.aborted && run.key === contextKey(getContext());
     const finish = run => {
@@ -51,7 +52,7 @@ export function createRetryController({ getContext, getSettings, onStatus = () =
     return {
         cancel,
         start(type = 'normal', options = {}, dryRun = false) {
-            if (dryRun || !TYPES.has(type) || !getSettings().enabled) return;
+            if (dryRun || !TYPES.has(type) || !enabled()) return;
             const context = getContext();
             if (context.mainApi !== 'openai') { onStatus({ phase: 'unsupported' }); return; }
             if (active && (!current(active) || active.inFlight)) cancel('superseded');
@@ -84,7 +85,7 @@ export function createRetryController({ getContext, getSettings, onStatus = () =
             }
         },
         groupStart({ type, selected_group } = {}) {
-            if (type === 'quiet' || !getSettings().enabled || getContext().mainApi !== 'openai') return;
+            if (type === 'quiet' || !enabled() || getContext().mainApi !== 'openai') return;
             wrapper = { id: selected_group ?? getContext().groupId, key: contextKey(getContext()) };
             if (active && current(active)) active.group = true;
         },
@@ -110,7 +111,7 @@ export function createRetryController({ getContext, getSettings, onStatus = () =
         },
         async fetch(fetcher, input, init) {
             const run = active;
-            if (!run?.armed || !getSettings().enabled || !current(run) || typeof init?.body !== 'string'
+            if (!run?.armed || !enabled() || !current(run) || typeof init?.body !== 'string'
                 || (init.method ?? 'GET').toUpperCase() !== 'POST') return fetcher(input, init);
             let url;
             try { url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url, globalThis.location?.href ?? 'http://localhost'); }

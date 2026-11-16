@@ -10,18 +10,21 @@ export function createSettingsPanel({ settings, onChange, notifier, onCancel }) 
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
-            <label class="checkbox_label"><input type="checkbox" data-setting="enabled"><span>启用自动重试与通知</span></label>
+            <label class="checkbox_label"><input type="checkbox" data-setting="retryEnabled"><span>启用自动重试</span></label>
+            <small>关闭后不重试上游请求；结果通知由下方开关独立控制，重试参数会保留。</small>
             <small>支持聊天补全（Chat Completion）的普通回复、重新生成、滑动、继续、代写与群聊。后台 quiet 请求不参与。</small>
             <div class="gr-grid">
                 <label>最多重试次数<input class="text_pole" type="number" min="0" max="10" step="1" data-setting="maxRetries"></label>
                 <label>首次等待（秒）<input class="text_pole" type="number" min="1" max="300" step="1" data-setting="delaySeconds"></label>
                 <label>最长等待（秒）<input class="text_pole" type="number" min="1" max="900" step="1" data-setting="maxDelaySeconds"></label>
             </div>
-            <small>重试次数不含第一次请求；设为 0 可仅保留通知。收到 Retry-After 时按提示等待，最长不超过上限。</small>
+            <small>重试次数不含第一次请求；设为 0 也不会重试。收到 Retry-After 时按提示等待，最长不超过上限。</small>
             <label class="checkbox_label"><input type="checkbox" data-setting="exponentialBackoff"><span>每次重试将等待时间翻倍</span></label>
             <label class="checkbox_label"><input type="checkbox" data-setting="retryEmpty"><span>自动重试没有正文、推理或工具调用的空回复</span></label>
             <small>只重试暂时故障；已输出内容后的断流会保留现有内容并通知失败。手动停止、切换聊天或连接会取消等待。</small>
             <hr>
+            <label class="checkbox_label"><input type="checkbox" data-setting="notificationsEnabled"><span>启用结果通知</span></label>
+            <small>可单独开启，不需要启用自动重试。浏览器无法投递桌面通知时使用酒馆内提示。</small>
             <label class="checkbox_label"><input type="checkbox" data-setting="notifySuccess"><span>生成成功时发送桌面通知</span></label>
             <label class="checkbox_label"><input type="checkbox" data-setting="notifyFailure"><span>最终失败时发送桌面通知</span></label>
             <label class="checkbox_label"><input type="checkbox" data-setting="backgroundOnly"><span>仅在酒馆页面不在前台时通知</span></label>

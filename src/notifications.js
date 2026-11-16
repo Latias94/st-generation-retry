@@ -72,6 +72,7 @@ export function createNotifier({ environment = globalThis, onStatus = () => {}, 
             return shown;
         },
         async publish(result, settings) {
+            if (!settings.notificationsEnabled) return;
             if (result.outcome === 'success' ? !settings.notifySuccess : !settings.notifyFailure) return;
             if (settings.backgroundOnly && environment.document?.visibilityState !== 'hidden' && environment.document?.hasFocus()) return;
             const success = result.outcome === 'success';
