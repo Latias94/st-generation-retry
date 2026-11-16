@@ -1,9 +1,9 @@
 import { DEFAULT_SETTINGS, normalizeSettings } from './policy.js';
 
-/** Keep only unsynchronized user edits locally, scoped to the current SillyTavern account. */
+/** Keep unsynchronized edits in tab storage, scoped to the current SillyTavern account. */
 export function createSettingsStore({ getContext, storage, userId, readSaved, onStatus = () => {} }) {
     const key = `st-generation-retry:pending:${encodeURIComponent(userId)}`;
-    let pending = {}, revision = 0, checking;
+    let pending = {}, revision = 0, checking, confirmRequested = false;
     const read = () => normalizeSettings(getContext().extensionSettings.generation_retry);
     const persist = () => {
         try {
@@ -18,7 +18,7 @@ export function createSettingsStore({ getContext, storage, userId, readSaved, on
     };
     const status = local => onStatus({ phase: Object.keys(pending).length ? 'pending' : 'saved', local });
     const confirm = async () => {
-        if (checking) return checking;
+        if (checking) { confirmRequested = true; return checking; }
         if (!Object.keys(pending).length) return;
         const version = revision;
         checking = (async () => {
@@ -34,8 +34,11 @@ export function createSettingsStore({ getContext, storage, userId, readSaved, on
             } catch { onStatus({ phase: 'unsynced', local: persist() }); }
             finally {
                 checking = undefined;
-                // A newer edit may have saved while this older readback was still in flight.
-                if (version !== revision) void confirm();
+                // A native save can finish after an older GET even without another UI edit.
+                if (confirmRequested || version !== revision) {
+                    confirmRequested = false;
+                    void confirm();
+                }
             }
         })();
         return checking;

@@ -14,9 +14,9 @@ function initialize() {
     const store = createSettingsStore({
         getContext, userId: getCurrentUserHandle(),
         storage: {
-            getItem: key => globalThis.localStorage.getItem(key),
-            setItem: (key, value) => globalThis.localStorage.setItem(key, value),
-            removeItem: key => globalThis.localStorage.removeItem(key),
+            getItem: key => globalThis.sessionStorage.getItem(key),
+            setItem: (key, value) => globalThis.sessionStorage.setItem(key, value),
+            removeItem: key => globalThis.sessionStorage.removeItem(key),
         },
         async readSaved() {
             const response = await fetch('/api/settings/get', {

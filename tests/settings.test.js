@@ -34,7 +34,6 @@ test('local edits are cleared only after matching server readback', async () => 
     assert.equal(local.size, 0);
     assert.equal(h.statuses.at(-1).phase, 'saved');
 });
-
 test('restoring pending fields preserves unrelated server-side settings', () => {
     const local = new Map(), before = setup(local);
     before.store.update({ ...normalizeSettings(), maxRetries: 7 });
@@ -72,6 +71,22 @@ test('a slow readback cannot clear newer pending edits', async () => {
     reads[0](old);
     await confirm;
     assert.equal(setup(local).store.restore().maxRetries, 8);
+    assert.equal(reads.length, 2);
+    const latest = store.confirm();
+    reads[1](next);
+    await latest;
+    assert.equal(local.size, 0);
+    assert.equal(h.statuses.at(-1).phase, 'saved');
+});
+
+test('overlapping save confirmations reread even when no newer edit changed the revision', async () => {
+    const local = new Map(), h = setup(local), reads = [];
+    const store = createSettingsStore({ ...h.options, readSaved: () => new Promise(done => reads.push(done)) });
+    const next = store.update({ ...normalizeSettings(), maxRetries: 7 });
+    const first = store.confirm();
+    void store.confirm();
+    reads[0](normalizeSettings());
+    await first;
     assert.equal(reads.length, 2);
     const latest = store.confirm();
     reads[1](next);

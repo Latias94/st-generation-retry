@@ -83,9 +83,9 @@ export function createSettingsPanel({ settings, onChange, notifier, onCancel }) 
         refreshPermission: permissionStatus,
         settingsStatus({ phase, local }) {
             const labels = {
-                pending: local ? '设置已保存在此浏览器，正在同步到酒馆；现在刷新也可恢复。' : '浏览器本地存储不可用，正在保存到酒馆；请等同步成功后再刷新。',
+                pending: local ? '设置已暂存到当前标签页，正在同步到酒馆；现在刷新也可恢复。' : '浏览器本地存储不可用，正在保存到酒馆；请等同步成功后再刷新。',
                 saved: '设置已保存，并从酒馆服务器读回确认。',
-                unsynced: local ? '设置已保存在此浏览器，但酒馆服务器尚未确认同步。刷新会恢复并重试同步。' : '设置尚未确认保存，本地存储也不可用。请检查服务器连接，暂勿刷新。',
+                unsynced: local ? '设置已暂存到当前标签页，但酒馆服务器尚未确认同步。刷新可恢复并重试；请等同步成功后再关闭标签页。' : '设置尚未确认保存，本地存储也不可用。请检查服务器连接，暂勿刷新。',
             };
             element.querySelector('.gr-save-status').textContent = labels[phase];
         },
