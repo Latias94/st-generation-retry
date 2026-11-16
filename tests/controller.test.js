@@ -276,7 +276,7 @@ test('notifications request permission only on explicit action and never disclos
     class Notification {
         static permission = 'default';
         static async requestPermission() { requests++; this.permission = 'granted'; }
-        constructor(title, options) { sent.push({ title, ...options }); }
+        constructor(title, options) { sent.push({ title, ...options }); queueMicrotask(() => this.onshow?.()); }
     }
     const environment = { Notification, isSecureContext: true, document: { visibilityState: 'visible', hasFocus: () => true } };
     const notifier = createNotifier({ environment, toast: (...args) => toasts.push(args) });

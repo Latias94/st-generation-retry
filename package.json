@@ -1,13 +1,13 @@
 {
     "name": "st-generation-retry",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "private": true,
     "type": "module",
     "license": "AGPL-3.0-only",
     "description": "Retry transient SillyTavern generation failures and send private desktop notifications.",
     "scripts": {
         "test": "node --test",
-        "check": "node --check index.js && node --check src/policy.js && node --check src/stream.js && node --check src/transport.js && node --check src/controller.js && node --check src/notifications.js && node --check src/ui.js"
+        "check": "node --check index.js && node --check src/policy.js && node --check src/stream.js && node --check src/transport.js && node --check src/controller.js && node --check src/notifications.js && node --check src/settings.js && node --check src/ui.js"
     },
     "engines": { "node": ">=20" }
 }

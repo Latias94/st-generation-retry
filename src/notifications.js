@@ -14,39 +14,70 @@ export function failureLabel(failure) {
     return `${FAILURE_LABELS[failure?.code] ?? '生成失败'}${failure?.status >= 400 ? `（HTTP ${failure.status}）` : ''}${failure?.partial ? '；已保留部分回复，请手动决定是否重生成' : ''}。`;
 }
 
-export function createNotifier({ environment = globalThis, toast = (kind, message) => globalThis.toastr?.[kind]?.(message, '自动重试与通知') } = {}) {
+export function createNotifier({ environment = globalThis, onStatus = () => {}, receiptTimeout = 5000,
+    toast = (kind, message) => globalThis.toastr?.[kind]?.(message, '自动重试与通知') } = {}) {
+    const active = new Set();
     const permission = () => {
         if (!environment.Notification) return 'unsupported';
         if (!environment.isSecureContext) return 'insecure';
         return environment.Notification.permission;
     };
-    const send = (title, body, tag) => {
-        try {
-            const notification = new environment.Notification(title, { body, tag });
-            notification.onclick = () => { environment.focus?.(); notification.close(); };
-            return true;
-        } catch { return false; }
+    const details = () => ({ permission: permission(), origin: environment.location?.origin ?? '' });
+    const report = phase => onStatus({ phase, ...details() });
+    const send = (title, body, tag, test = false) => {
+        report('sending');
+        return new Promise(resolve => {
+            let notification, settled = false;
+            const finish = phase => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                if (phase !== 'shown') active.delete(notification);
+                report(phase);
+                resolve(phase === 'shown');
+            };
+            const timer = setTimeout(() => finish('unconfirmed'), receiptTimeout);
+            try {
+                notification = new environment.Notification(title, { body, tag, requireInteraction: test });
+                // Hold live objects until close, so garbage collection cannot discard their event handlers.
+                if (active.size >= 8) active.delete(active.values().next().value);
+                active.add(notification);
+                notification.onshow = () => finish('shown');
+                notification.onerror = () => finish('error');
+                notification.onclose = () => { active.delete(notification); finish('unconfirmed'); };
+                notification.onclick = () => { environment.focus?.(); notification.close(); };
+            } catch { finish('error'); }
+        });
     };
     return {
         permission,
+        details,
         async requestPermission() {
-            if (permission() !== 'default') return permission();
+            if (permission() !== 'default') { report('permission'); return permission(); }
             try { await environment.Notification.requestPermission(); }
             catch { toast('warning', '通知权限申请未完成，请检查浏览器的站点设置。'); }
+            report('permission');
             return permission();
         },
-        test() {
-            if (permission() === 'granted' && send('SillyTavern · 通知测试', '桌面通知已启用。通知不会包含聊天正文。', 'st-generation-retry-test')) return true;
-            toast('info', '桌面通知尚不可用。请先授权，并检查浏览器和系统通知设置。');
-            return false;
+        async test() {
+            if (permission() !== 'granted') {
+                report('permission');
+                toast('warning', `当前站点 ${details().origin} 尚未获得桌面通知权限。请查看下方权限说明。`);
+                return false;
+            }
+            const shown = await send('SillyTavern · 通知测试', '这是一条桌面通知测试，不包含聊天正文。', `st-generation-retry-test-${Date.now()}`, true);
+            toast(shown ? 'info' : 'warning', shown
+                ? '浏览器已确认发出通知。如未看到横幅，请按 Win+N 查看通知中心，并检查 Windows 的勿扰模式和浏览器通知开关。'
+                : '未收到桌面通知的显示回执。请检查当前站点权限、Windows 通知开关，以及浏览器是否被系统允许发送通知。');
+            return shown;
         },
-        publish(result, settings) {
+        async publish(result, settings) {
             if (result.outcome === 'success' ? !settings.notifySuccess : !settings.notifyFailure) return;
             if (settings.backgroundOnly && environment.document?.visibilityState !== 'hidden' && environment.document?.hasFocus()) return;
             const success = result.outcome === 'success';
             const title = success ? 'SillyTavern · 生成完成' : 'SillyTavern · 生成最终失败';
             const body = `${success ? '回复生成完成。' : failureLabel(result.failure)}${result.retries ? `本次共重试 ${result.retries} 次。` : ''}`;
-            if (permission() === 'granted' && send(title, body, `st-generation-retry-${result.id}`)) return;
+            if (permission() === 'granted' && await send(title, body, `st-generation-retry-${result.id}`)) return;
             toast(success ? 'success' : 'error', body);
         },
     };

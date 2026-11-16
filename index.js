@@ -1,17 +1,36 @@
 import { createRetryController } from './src/controller.js';
-import { normalizeSettings } from './src/policy.js';
 import { createNotifier } from './src/notifications.js';
 import { createSettingsPanel } from './src/ui.js';
+import { createSettingsStore } from './src/settings.js';
 import { isGenerating } from '/script.js';
+import { getCurrentUserHandle } from '/scripts/user.js';
 
 const INSTANCE = Symbol.for('st-generation-retry.instance');
 
 function initialize() {
     if (globalThis[INSTANCE] || !globalThis.SillyTavern?.getContext) return;
     const getContext = () => globalThis.SillyTavern.getContext();
-    const getSettings = () => normalizeSettings(getContext().extensionSettings.generation_retry);
-    const notifier = createNotifier();
-    let view;
+    let view, saveStatus;
+    const store = createSettingsStore({
+        getContext, userId: getCurrentUserHandle(),
+        storage: {
+            getItem: key => globalThis.localStorage.getItem(key),
+            setItem: (key, value) => globalThis.localStorage.setItem(key, value),
+            removeItem: key => globalThis.localStorage.removeItem(key),
+        },
+        async readSaved() {
+            const response = await fetch('/api/settings/get', {
+                method: 'POST', headers: getContext().getRequestHeaders(), body: '{}', cache: 'no-cache',
+            });
+            if (!response.ok) throw new Error('Settings readback failed');
+            const data = await response.json();
+            return JSON.parse(data.settings).extension_settings?.generation_retry;
+        },
+        onStatus(status) { saveStatus = status; view?.settingsStatus(status); },
+    });
+    const getSettings = store.read;
+    store.restore();
+    const notifier = createNotifier({ onStatus: status => view?.notificationStatus(status) });
     const controller = createRetryController({
         getContext, getSettings,
         isHostBusy: () => isGenerating() || Boolean(getContext().streamingProcessor && !getContext().streamingProcessor.isStopped),
@@ -26,6 +45,7 @@ function initialize() {
         subscriptions.push([type, callback]);
     };
     on(eventTypes.GENERATION_AFTER_COMMANDS, (...args) => controller.start(...args));
+    on(eventTypes.SETTINGS_UPDATED, () => { void store.confirm(); });
     on(eventTypes.GENERATION_ENDED, () => controller.end());
     on(eventTypes.CHAT_COMPLETION_SETTINGS_READY, data => controller.requestReady(data));
     on(eventTypes.CHARACTER_MESSAGE_RENDERED, () => controller.rendered());
@@ -61,14 +81,13 @@ function initialize() {
         view = createSettingsPanel({
             settings: getSettings(), notifier,
             onChange(value) {
-                const next = normalizeSettings(value), context = getContext();
-                context.extensionSettings.generation_retry = next;
-                context.saveSettingsDebounced();
+                const next = store.update(value), context = getContext();
                 if (!next.enabled && controller.cancel('disabled')) context.stopGeneration();
                 return next;
             },
             onCancel() { getContext().stopGeneration(); controller.cancel(); },
         });
+        if (saveStatus) view.settingsStatus(saveStatus);
         parent.append(view.element);
     };
     on(eventTypes.APP_READY, installPanel);

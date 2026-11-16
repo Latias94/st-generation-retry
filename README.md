@@ -14,7 +14,11 @@ Requires SillyTavern 1.13.0 or later. No server plugin, Node package installatio
 
 Open **Extensions → 自动重试与通知** to configure the extension. It is enabled by default. Select **授权桌面通知** to request permission, allow notifications in the browser, and then select **测试通知**. Permission is requested only after that button is pressed. Notification text never includes character names, prompts, reasoning, or reply content.
 
-Browsers require HTTPS or a localhost origin for desktop notifications. For a local server, use `http://localhost:8000` or `http://127.0.0.1:8000`. A plain HTTP LAN address does not qualify. If permission is denied, unavailable, or the notification constructor fails, the extension uses a SillyTavern toast. Browser and operating system notification settings still control delivery. Keep the SillyTavern page open while generating.
+Browsers require HTTPS or a localhost origin for desktop notifications. For a local server, use `http://localhost:8000` or `http://127.0.0.1:8000`. A plain HTTP LAN address does not qualify. If permission is denied, unavailable, or delivery fails or has no browser receipt within five seconds, the extension uses a SillyTavern toast. Browser and operating system notification settings still control delivery. Keep the SillyTavern page open while generating.
+
+The panel identifies the exact current origin. `localhost` and `127.0.0.1`, different ports, and different browser profiles have separate permissions. The extension cannot grant or retain browser permissions itself. Allow notifications for the address actually shown in the panel.
+
+**测试通知** reports progress and then the browser's `show`/`error` event, or a timeout. A `show` receipt confirms the browser accepted the notification; it cannot prove that Windows showed a banner to the user. If the browser reports success but no banner appears, press **Win+N** and check **Windows Settings → System → Notifications → Microsoft Edge / your browser → Show notification banners**, together with Do not disturb. Browser permission and the Windows banner switch must both allow display.
 
 ## Settings
 
@@ -32,7 +36,7 @@ Browsers require HTTPS or a localhost origin for desktop notifications. For a lo
 
 The status area displays preparation, active requests, retry delays, and the final result. **停止本次生成 / 重试** cancels the generation and any pending retry. The native SillyTavern stop button works as well. Manual cancellation sends no success or failure notification.
 
-Settings are saved in SillyTavern's user settings. Editing retry limits takes effect on the next request; disabling the extension also stops its active generation.
+Settings are saved in SillyTavern's user settings. Valid input is also recorded immediately as a pending local patch, scoped to the current origin and SillyTavern account, so refreshing before the native debounced save completes does not discard the edit. The patch contains only changed extension options; it is replayed on reload and removed after a matching server readback. The panel distinguishes local persistence, pending synchronization, and confirmed server storage. If browser storage is blocked, it warns that synchronization must finish before reloading. Editing retry limits takes effect on the next request; disabling the extension also stops its active generation.
 
 ## Supported requests
 

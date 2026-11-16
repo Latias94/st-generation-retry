@@ -1,0 +1,72 @@
+import { DEFAULT_SETTINGS, normalizeSettings } from './policy.js';
+
+/** Keep only unsynchronized user edits locally, scoped to the current SillyTavern account. */
+export function createSettingsStore({ getContext, storage, userId, readSaved, onStatus = () => {} }) {
+    const key = `st-generation-retry:pending:${encodeURIComponent(userId)}`;
+    let pending = {}, revision = 0, checking;
+    const read = () => normalizeSettings(getContext().extensionSettings.generation_retry);
+    const persist = () => {
+        try {
+            Object.keys(pending).length ? storage.setItem(key, JSON.stringify(pending)) : storage.removeItem(key);
+            return true;
+        } catch { return false; }
+    };
+    const apply = () => {
+        const value = normalizeSettings({ ...read(), ...pending });
+        getContext().extensionSettings.generation_retry = value;
+        return value;
+    };
+    const status = local => onStatus({ phase: Object.keys(pending).length ? 'pending' : 'saved', local });
+    const confirm = async () => {
+        if (checking) return checking;
+        if (!Object.keys(pending).length) return;
+        const version = revision;
+        checking = (async () => {
+            try {
+                const saved = normalizeSettings(await readSaved());
+                if (version !== revision) return;
+                for (const [name, value] of Object.entries(pending)) {
+                    if (saved[name] === value) delete pending[name];
+                }
+                const local = persist();
+                if (Object.keys(pending).length) onStatus({ phase: 'unsynced', local });
+                else onStatus({ phase: 'saved', local });
+            } catch { onStatus({ phase: 'unsynced', local: persist() }); }
+            finally {
+                checking = undefined;
+                // A newer edit may have saved while this older readback was still in flight.
+                if (version !== revision) void confirm();
+            }
+        })();
+        return checking;
+    };
+    return {
+        read,
+        restore() {
+            try {
+                const value = JSON.parse(storage.getItem(key) ?? '{}');
+                if (value && typeof value === 'object' && !Array.isArray(value)) {
+                    const normalized = normalizeSettings(value);
+                    pending = Object.fromEntries(Object.keys(DEFAULT_SETTINGS).filter(name => Object.hasOwn(value, name)).map(name => [name, normalized[name]]));
+                }
+            } catch { /* Invalid or blocked local storage must not prevent native settings loading. */ }
+            if (!Object.keys(pending).length) return read();
+            const value = apply();
+            status(persist());
+            getContext().saveSettingsDebounced();
+            return value;
+        },
+        update(value) {
+            const before = read(), next = normalizeSettings(value);
+            for (const name of Object.keys(DEFAULT_SETTINGS)) {
+                if (next[name] !== before[name]) pending[name] = next[name];
+            }
+            revision++;
+            getContext().extensionSettings.generation_retry = next;
+            status(persist());
+            getContext().saveSettingsDebounced();
+            return next;
+        },
+        confirm,
+    };
+}
