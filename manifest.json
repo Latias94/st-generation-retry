@@ -1,0 +1,12 @@
+{
+    "display_name": "Generation Retry · 自动重试与通知",
+    "loading_order": 130,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "Frankorz",
+    "version": "0.1.0",
+    "minimum_client_version": "1.13.0",
+    "homePage": "https://github.com/Latias94/st-generation-retry"
+}

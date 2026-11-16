@@ -1,0 +1,44 @@
+#generation-retry-settings .inline-drawer-content {
+    padding: 8px 4px;
+}
+
+#generation-retry-settings small {
+    display: block;
+    opacity: 0.8;
+    line-height: 1.5;
+    margin: 6px 0 10px;
+}
+
+#generation-retry-settings .gr-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 10px;
+    margin-top: 10px;
+}
+
+#generation-retry-settings .gr-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+#generation-retry-settings .gr-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 10px 0;
+}
+
+#generation-retry-settings button {
+    width: auto;
+}
+
+#generation-retry-settings .gr-status {
+    border-left: 3px solid var(--SmartThemeQuoteColor);
+    padding: 6px 10px;
+    line-height: 1.5;
+}
+
+#generation-retry-settings .gr-error {
+    border-left-color: #e87c72;
+}
