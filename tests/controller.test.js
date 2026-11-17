@@ -7,12 +7,13 @@ import { requestWithRetry } from '../src/transport.js';
 
 function setup(request) {
     const context = { chatId: 'test', characterId: 1, mainApi: 'openai', chatCompletionSettings: {} };
-    const jobs = new Map(), outcomes = [], sessions = [], statuses = [];
+    const jobs = new Map(), outcomes = [], sessions = [], statuses = [], logs = [];
     const settings = normalizeSettings();
     let serial = 0, busy = false;
     const controller = createRetryController({
         getContext: () => context, getSettings: () => settings,
         isHostBusy: () => busy,
+        logger: { error: (...args) => logs.push(args) },
         onOutcome: value => outcomes.push(value), onStatus: value => statuses.push(value),
         request: async (...args) => { sessions.push(args[4]); return request ? request(...args) : Response.json({}); },
         schedule: callback => { const id = ++serial; jobs.set(id, callback); return id; },
@@ -24,7 +25,7 @@ function setup(request) {
         if (prepare) controller.requestReady(data);
         return controller.fetch(fetcher, url, { method: 'POST', body: JSON.stringify(data) });
     };
-    return { controller, context, outcomes, sessions, statuses, settings, fetch,
+    return { controller, context, outcomes, sessions, statuses, settings, logs, fetch,
         setBusy: value => { busy = value; },
         flush: () => { const pending = [...jobs.values()]; jobs.clear(); pending.forEach(callback => callback()); } };
 }
@@ -53,6 +54,45 @@ test('does not misclassify the error-path MESSAGE_RECEIVED event as success', as
     h.controller.rendered();
     h.flush();
     assert.deepEqual(h.outcomes.map(x => x.outcome), ['failure']);
+});
+
+test('a streamed error produces one safe final diagnostic even when result notifications are disabled', async () => {
+    const h = setup(requestWithRetry);
+    Object.assign(h.settings, { retryEnabled: true, notificationsEnabled: false, maxRetries: 0 });
+    const signal = new AbortController().signal;
+    h.context.streamingProcessor = { abortController: { signal } };
+    const data = { type: 'normal', stream: true };
+    h.controller.start();
+    h.controller.requestReady(data);
+    const response = await h.controller.fetch(async () => new Response('data: {"error":{"message":"PRIVATE","status":503}}\n\n',
+        { headers: { 'content-type': 'text/event-stream' } }), '/api/backends/chat-completions/generate',
+        { method: 'POST', signal, body: JSON.stringify(data) });
+    await assert.rejects(response.text(), { code: 'upstream-error' });
+    assert.equal(h.logs.length, 0, 'Report the consolidated failure after the native generation ends');
+    h.controller.end();
+    h.flush();
+    h.controller.end();
+    h.flush();
+    assert.equal(h.logs.length, 1);
+    assert.equal(h.logs[0][0], '[Generation Retry] Generation failed.');
+    assert.deepEqual(h.logs[0][1], { generation: 1, code: 'upstream-error', status: 503, partial: false, retries: 0 });
+    assert.equal(JSON.stringify(h.logs).includes('PRIVATE'), false);
+    assert.deepEqual(h.outcomes.map(x => x.outcome), ['failure']);
+});
+
+test('recovered failures and manual stops do not log a final failure', async () => {
+    for (const cancelled of [false, true]) {
+        const h = setup();
+        h.controller.start();
+        await h.fetch();
+        h.sessions[0].onRetry({ retry: 1, milliseconds: 1000 });
+        if (cancelled) h.controller.cancel();
+        h.sessions[0].onResult('success', {});
+        h.controller.rendered();
+        h.controller.end();
+        h.flush();
+        assert.equal(h.logs.length, 0);
+    }
 });
 
 test('waits for tool follow-ups and consolidates their outcome', async () => {

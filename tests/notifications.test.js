@@ -55,6 +55,22 @@ test('result notifications fall back to a toast if system delivery fails', async
     assert.equal(h.toasts[0][0], 'success');
 });
 
+for (const mode of ['show', 'error', 'silent', 'throw']) {
+    test(`a final failure immediately shows one in-app error with desktop delivery mode ${mode}`, async () => {
+        const h = setup(mode);
+        const pending = h.notifier.publish({ outcome: 'failure', retries: 2, id: 1,
+            failure: { code: 'incomplete-stream', partial: true, message: 'PRIVATE' } }, normalizeSettings());
+        assert.equal(h.toasts.length, 1, 'The in-app error must not wait for a desktop receipt');
+        assert.equal(h.toasts[0][0], 'error');
+        assert.equal(h.toasts[0][1].includes('已保留部分回复'), true);
+        assert.equal(h.toasts[0][1].includes('2'), true);
+        await pending;
+        assert.equal(h.sent.length, 1);
+        assert.equal(h.toasts.length, 1, 'A failed receipt must not duplicate the in-app error');
+        assert.equal(JSON.stringify([h.sent, h.toasts]).includes('PRIVATE'), false);
+    });
+}
+
 test('permission information names the exact origin and does not request permission implicitly', async () => {
     const h = setup('show');
     h.environment.Notification.permission = 'default';
@@ -83,5 +99,6 @@ test('success and failure desktop notifications remain enabled with retry switch
         await h.notifier.publish({ outcome, id: 1 }, normalizeSettings({ retryEnabled: false, notificationsEnabled: true }));
     }
     assert.equal(h.sent.length, 2);
-    assert.equal(h.toasts.length, 0);
+    assert.equal(h.toasts.length, 1);
+    assert.equal(h.toasts[0][0], 'error');
 });

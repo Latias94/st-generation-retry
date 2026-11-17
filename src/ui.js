@@ -24,7 +24,7 @@ export function createSettingsPanel({ settings, onChange, notifier, onCancel }) 
             <small>只重试暂时故障；已输出内容后的断流会保留现有内容并通知失败。手动停止、切换聊天或连接会取消等待。</small>
             <hr>
             <label class="checkbox_label"><input type="checkbox" data-setting="notificationsEnabled"><span>启用结果通知</span></label>
-            <small>可单独开启，不需要启用自动重试。浏览器无法投递桌面通知时使用酒馆内提示。</small>
+            <small>可单独开启，不需要启用自动重试。最终失败时同时显示酒馆内错误提示；成功通知无法投递时回退为酒馆内提示。</small>
             <label class="checkbox_label"><input type="checkbox" data-setting="notifySuccess"><span>生成成功时发送桌面通知</span></label>
             <label class="checkbox_label"><input type="checkbox" data-setting="notifyFailure"><span>最终失败时发送桌面通知</span></label>
             <label class="checkbox_label"><input type="checkbox" data-setting="backgroundOnly"><span>仅在酒馆页面不在前台时通知</span></label>

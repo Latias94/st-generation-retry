@@ -78,8 +78,10 @@ export function createNotifier({ environment = globalThis, onStatus = () => {}, 
             const success = result.outcome === 'success';
             const title = success ? 'SillyTavern · 生成完成' : 'SillyTavern · 生成最终失败';
             const body = `${success ? '回复生成完成。' : failureLabel(result.failure)}${result.retries ? `本次共重试 ${result.retries} 次。` : ''}`;
+            // Failure feedback must remain visible even when desktop delivery succeeds or stalls.
+            if (!success) toast('error', body);
             if (permission() === 'granted' && await send(title, body, `st-generation-retry-${result.id}`)) return;
-            toast(success ? 'success' : 'error', body);
+            if (success) toast('success', body);
         },
     };
 }

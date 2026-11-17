@@ -11,7 +11,8 @@ function contextKey(context) {
 }
 
 export function createRetryController({ getContext, getSettings, onStatus = () => {}, onOutcome = () => {},
-    isHostBusy = () => false, request = requestWithRetry, schedule = setTimeout, unschedule = clearTimeout }) {
+    isHostBusy = () => false, request = requestWithRetry, schedule = setTimeout, unschedule = clearTimeout,
+    logger = globalThis.console }) {
     let active, wrapper, serial = 0, timer;
     const enabled = () => getSettings().retryEnabled || getSettings().notificationsEnabled;
     const clearTimer = () => { unschedule(timer); timer = undefined; };
@@ -25,6 +26,11 @@ export function createRetryController({ getContext, getSettings, onStatus = () =
         if (outcome === 'success' && !run.rendered && !(run.toolCalls && run.toolsCompleted)) return;
         active = null;
         clearTimer();
+        if (failure) {
+            // Log only our diagnostic fields, never the upstream body, request, or error object.
+            logger?.error?.('[Generation Retry] Generation failed.', { generation: run.id, code: failure.code,
+                status: failure.status, partial: failure.partial, retries: run.retries });
+        }
         onStatus({ phase: outcome, retries: run.retries, failure });
         onOutcome({ outcome, retries: run.retries, failure, id: run.id }, getSettings());
     };
