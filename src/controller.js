@@ -20,7 +20,7 @@ export function createRetryController({ getContext, getSettings, onStatus = () =
     const finish = run => {
         if (!current(run) || run.inFlight || run.toolsPending || run.group || !run.ended || isHostBusy()) return;
         if (!run.requests) { active = null; return; }
-        const failure = run.failure ?? (run.toolFailure || (run.toolCalls && !run.toolsCompleted) ? new GenerationFailure('tool-error') : null);
+        const failure = run.failure ?? run.toolFailure ?? (run.toolCalls && !run.toolsCompleted ? new GenerationFailure('tool-error') : null);
         const outcome = failure ? 'failure' : run.success ? 'success' : null;
         if (!outcome) return;
         if (outcome === 'success' && !run.rendered && !(run.toolCalls && run.toolsCompleted)) return;
@@ -108,11 +108,13 @@ export function createRetryController({ getContext, getSettings, onStatus = () =
             active.toolsPending = true;
             return { run: active, request: active.requests };
         },
-        toolsFinished(token, failed) {
+        toolsFinished(token, errors = []) {
             if (!token || !current(token.run) || token.request !== token.run.requests) return;
             token.run.toolsPending = false;
             token.run.toolsCompleted = true;
-            token.run.toolFailure = Boolean(failed);
+            token.run.toolFailure = errors?.length ? new GenerationFailure('tool-error', {
+                detail: { message: errors.map(error => String(error)).join('\n') },
+            }) : null;
             if (token.run.ended) queueFinish(token.run);
         },
         async fetch(fetcher, input, init) {
@@ -139,7 +141,8 @@ export function createRetryController({ getContext, getSettings, onStatus = () =
             run.inFlight = true;
             run.rendered = false;
             run.toolCalls = false;
-            run.toolsPending = run.toolsCompleted = run.toolFailure = false;
+            run.toolsPending = run.toolsCompleted = false;
+            run.toolFailure = null;
             run.ended = false;
             run.requests++;
             onStatus({ phase: 'generating', retries: run.retries });

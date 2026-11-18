@@ -58,13 +58,16 @@ export class StreamInspector {
         if (final) {
             // Native SSE parsing ignores an event without its blank-line delimiter.
             if (!this.terminal && (this.data.length || (this.pending && !this.pending.startsWith(':')))) {
-                throw new GenerationFailure('incomplete-stream', { retryable: true });
+                const body = [...this.data, this.pending].filter(Boolean).join('\n');
+                throw new GenerationFailure('incomplete-stream', { retryable: true, detail: { body, event: this.event } });
             }
             this.pending = '';
             this.data = [];
             this.event = '';
         }
-        if (this.pending.length > 16 * 1024 * 1024) throw new GenerationFailure('invalid-stream');
+        if (this.pending.length > 16 * 1024 * 1024) {
+            throw new GenerationFailure('invalid-stream', { detail: { body: this.pending, event: this.event } });
+        }
     }
 
     line(line) {
@@ -80,15 +83,20 @@ export class StreamInspector {
         this.event = '';
         if (raw === '[DONE]') { this.terminal = this.finished = true; return; }
         if (!raw) return;
-        let parsed;
-        try { parsed = JSON.parse(raw); }
-        catch { throw new GenerationFailure('invalid-stream', { retryable: true }); }
-        const inspection = inspectPayload(parsed);
+        let parsed, inspection;
+        try {
+            parsed = JSON.parse(raw);
+            inspection = inspectPayload(parsed);
+        } catch (error) {
+            throw new GenerationFailure('invalid-stream', { retryable: true, detail: { body: raw, event, message: String(error) } });
+        }
         // Latch content before reporting an error in the same frame: replay would be unsafe.
         this.output ||= inspection.output;
         this.toolCalls ||= inspection.toolCalls;
-        if (inspection.failure) throw inspection.failure;
-        if (event === 'error' || parsed?.type === 'error') throw new GenerationFailure('upstream-error', { retryable: true });
+        if (inspection.failure) throw inspection.failure.addDetail({ body: raw, event });
+        if (event === 'error' || parsed?.type === 'error') {
+            throw new GenerationFailure('upstream-error', { retryable: true, detail: { body: raw, event } });
+        }
         for (const index of inspection.finishes) this.finishedChoices.add(index);
         this.finished ||= inspection.finished || this.finishedChoices.size >= this.expectedChoices;
         this.terminal ||= inspection.terminal;

@@ -62,9 +62,10 @@ test('a streamed error produces one safe final diagnostic even when result notif
     const signal = new AbortController().signal;
     h.context.streamingProcessor = { abortController: { signal } };
     const data = { type: 'normal', stream: true };
+    const raw = '{"error":{"message":"PRIVATE","status":503}}';
     h.controller.start();
     h.controller.requestReady(data);
-    const response = await h.controller.fetch(async () => new Response('data: {"error":{"message":"PRIVATE","status":503}}\n\n',
+    const response = await h.controller.fetch(async () => new Response(`event: error\ndata: ${raw}\n\n`,
         { headers: { 'content-type': 'text/event-stream' } }), '/api/backends/chat-completions/generate',
         { method: 'POST', signal, body: JSON.stringify(data) });
     await assert.rejects(response.text(), { code: 'upstream-error' });
@@ -78,6 +79,8 @@ test('a streamed error produces one safe final diagnostic even when result notif
     assert.deepEqual(h.logs[0][1], { generation: 1, code: 'upstream-error', status: 503, partial: false, retries: 0 });
     assert.equal(JSON.stringify(h.logs).includes('PRIVATE'), false);
     assert.deepEqual(h.outcomes.map(x => x.outcome), ['failure']);
+    assert.equal(h.statuses.at(-1).failure.detail.body, raw);
+    assert.equal(h.statuses.at(-1).failure.detail.event, 'error');
 });
 
 test('recovered failures and manual stops do not log a final failure', async () => {
@@ -232,7 +235,7 @@ test('a successful tool-only generation can finish without a rendered assistant 
     await h.fetch();
     h.sessions[0].onResult('success', { toolCalls: true });
     const tools = h.controller.toolsStarted();
-    h.controller.toolsFinished(tools, false);
+    h.controller.toolsFinished(tools, []);
     h.controller.end();
     h.flush();
     assert.deepEqual(h.outcomes.map(x => x.outcome), ['success']);
@@ -323,10 +326,11 @@ test('a failing stealth tool is a final failure, not a successful empty reply', 
     await h.fetch();
     h.sessions[0].onResult('success', { toolCalls: true });
     const tools = h.controller.toolsStarted();
-    h.controller.toolsFinished(tools, true);
+    h.controller.toolsFinished(tools, [new Error('Tool diagnostic')]);
     h.controller.end();
     h.flush();
     assert.deepEqual(h.outcomes.map(x => [x.outcome, x.failure?.code]), [['failure', 'tool-error']]);
+    assert.equal(h.statuses.at(-1).failure.detail.message, 'Error: Tool diagnostic');
 });
 
 test('unhandled tool calls cannot produce a success notification', async () => {

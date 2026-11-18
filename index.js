@@ -30,7 +30,10 @@ function initialize() {
     });
     const getSettings = store.read;
     store.restore();
-    const notifier = createNotifier({ onStatus: status => view?.notificationStatus(status) });
+    const notifier = createNotifier({
+        getRequestHeaders: () => getContext().getRequestHeaders(),
+        onStatus: status => view?.notificationStatus(status),
+    });
     const controller = createRetryController({
         getContext, getSettings,
         isHostBusy: () => isGenerating() || Boolean(getContext().streamingProcessor && !getContext().streamingProcessor.isStopped),
@@ -66,10 +69,10 @@ function initialize() {
         const token = controller.toolsStarted();
         try {
             const result = await previousInvokeTools.apply(this, args);
-            controller.toolsFinished(token, Boolean(result?.errors?.length));
+            controller.toolsFinished(token, result?.errors);
             return result;
         } catch (error) {
-            controller.toolsFinished(token, true);
+            controller.toolsFinished(token, [error]);
             throw error;
         }
     };
@@ -91,7 +94,7 @@ function initialize() {
         parent.append(view.element);
     };
     on(eventTypes.APP_READY, installPanel);
-    const onFocus = () => view?.refreshPermission();
+    const onFocus = () => view?.refreshNotificationControls();
     globalThis.addEventListener('focus', onFocus);
     installPanel();
     globalThis[INSTANCE] = {

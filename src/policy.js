@@ -1,6 +1,7 @@
 export const DEFAULT_SETTINGS = Object.freeze({
     retryEnabled: true,
     notificationsEnabled: true,
+    notificationChannel: 'browser',
     maxRetries: 3,
     delaySeconds: 2,
     exponentialBackoff: true,
@@ -17,6 +18,7 @@ export function normalizeSettings(value = {}) {
     for (const key of Object.keys(result)) {
         if (typeof result[key] === 'boolean' && typeof value[key] === 'boolean') result[key] = value[key];
     }
+    if (value.notificationChannel === 'tray') result.notificationChannel = 'tray';
     // Preserve the old combined switch unless an independent switch has been saved.
     if (typeof value.enabled === 'boolean') {
         for (const key of ['retryEnabled', 'notificationsEnabled']) {
@@ -31,18 +33,32 @@ export function normalizeSettings(value = {}) {
     return result;
 }
 
+const FAILURE_DETAIL_LIMIT = 16 * 1024;
+
 export class GenerationFailure extends Error {
-    constructor(code, { status = 0, retryable = false, partial = false } = {}) {
+    constructor(code, { status = 0, retryable = false, partial = false, detail } = {}) {
         super(`Generation Retry: ${code}${status ? ` (HTTP ${status})` : ''}`);
         this.name = 'GenerationFailure';
         this.code = code;
         this.status = status;
         this.retryable = retryable;
         this.partial = partial;
+        if (detail) this.addDetail(detail);
+    }
+
+    addDetail({ body, message, ...metadata }) {
+        const detail = this.detail ??= {};
+        Object.assign(detail, metadata);
+        if (message !== undefined) detail.message = message.slice(0, FAILURE_DETAIL_LIMIT);
+        if (body !== undefined) {
+            detail.body = body.slice(0, FAILURE_DETAIL_LIMIT);
+            detail.truncated = body.length > FAILURE_DETAIL_LIMIT;
+        }
+        return this;
     }
 }
 
-// Only inspect known error fields. Never retain or display the upstream body, which may contain prompts.
+// Classify retries from known error fields. Raw response data is captured separately for in-page diagnostics.
 export function responseFailure(data, status = 200) {
     const error = data?.error ?? data?.detail?.error;
     if (status < 400 && !error && !data?.quota_error && !data?.promptFeedback?.blockReason) return null;
@@ -60,7 +76,10 @@ export function responseFailure(data, status = 200) {
 export function networkFailure(error) {
     if (error instanceof GenerationFailure) return error;
     if (error?.name === 'AbortError') return error;
-    return new GenerationFailure('network-error', { retryable: error instanceof TypeError || /network|fetch|terminated|reset/i.test(error?.message ?? '') });
+    return new GenerationFailure('network-error', {
+        retryable: error instanceof TypeError || /network|fetch|terminated|reset/i.test(error?.message ?? ''),
+        detail: { message: error == null ? undefined : String(error) },
+    });
 }
 
 export function retryDelay(settings, retry, retryAfter, now = Date.now()) {

@@ -1,4 +1,21 @@
-import { failureLabel } from './notifications.js';
+import { failureLabel, TRAY_MESSAGES } from './notifications.js';
+
+function formatFailureDetails({ failure, retries }) {
+    const { code, status, detail } = failure;
+    const lines = [`错误分类 ${code}`, `重试次数 ${retries}`];
+    if (detail?.httpStatus !== undefined) {
+        lines.push(`HTTP ${detail.httpStatus}${detail.statusText ? ` ${detail.statusText}` : ''}`);
+        lines.push(`Content-Type ${detail.contentType ?? '（未提供）'}`);
+    }
+    if (status >= 400 && status !== detail?.httpStatus) lines.push(`错误状态 ${status}`);
+    if (detail?.event) lines.push(`SSE event ${detail.event}`);
+    if (detail?.message) lines.push('', detail.message);
+    if (detail?.body !== undefined) {
+        const source = detail.event === undefined ? '原始响应（酒馆返回）' : '原始 SSE 数据（酒馆返回）';
+        lines.push('', `${source}${detail.truncated ? ' · 已截断' : ''}`, detail.body || '（空响应体）');
+    }
+    return lines.join('\n');
+}
 
 export function createSettingsPanel({ settings, onChange, notifier, onCancel }) {
     const element = document.createElement('div');
@@ -25,6 +42,12 @@ export function createSettingsPanel({ settings, onChange, notifier, onCancel }) 
             <hr>
             <label class="checkbox_label"><input type="checkbox" data-setting="notificationsEnabled"><span>启用结果通知</span></label>
             <small>可单独开启，不需要启用自动重试。最终失败时同时显示酒馆内错误提示；成功通知无法投递时回退为酒馆内提示。</small>
+            <label>通知方式
+                <select class="text_pole" data-setting="notificationChannel">
+                    <option value="browser">浏览器通知</option>
+                    <option value="tray">Windows 托盘应用</option>
+                </select>
+            </label>
             <label class="checkbox_label"><input type="checkbox" data-setting="notifySuccess"><span>生成成功时发送桌面通知</span></label>
             <label class="checkbox_label"><input type="checkbox" data-setting="notifyFailure"><span>最终失败时发送桌面通知</span></label>
             <label class="checkbox_label"><input type="checkbox" data-setting="backgroundOnly"><span>仅在酒馆页面不在前台时通知</span></label>
@@ -35,10 +58,20 @@ export function createSettingsPanel({ settings, onChange, notifier, onCancel }) 
                 <button type="button" class="menu_button" data-action="cancel" disabled>停止本次生成 / 重试</button>
             </div>
             <small class="gr-permission"></small>
-            <div class="gr-notification-status" role="status" aria-live="polite">点击“测试通知”后，这里会显示浏览器的发送结果。</div>
+            <div class="gr-notification-status" role="status" aria-live="polite">点击“测试通知”检查当前通知方式。</div>
             <div class="gr-status" role="status" aria-live="polite">等待下一次生成。</div>
+            <details class="gr-failure-details" hidden>
+                <summary>最近一次失败详情</summary>
+                <pre tabindex="0" aria-label="错误详情文本"></pre>
+            </details>
         </div>`;
     const inputs = [...element.querySelectorAll('[data-setting]')];
+    const channel = element.querySelector('[data-setting="notificationChannel"]');
+    const permissionButton = element.querySelector('[data-action="permission"]');
+    const permissionHint = element.querySelector('.gr-permission');
+    const deliveryStatus = element.querySelector('.gr-notification-status');
+    const failureDetails = element.querySelector('.gr-failure-details');
+    const failureText = failureDetails.querySelector('pre');
     const apply = value => inputs.forEach(input => {
         input.type === 'checkbox' ? input.checked = value[input.dataset.setting] : input.value = value[input.dataset.setting];
     });
@@ -49,11 +82,23 @@ export function createSettingsPanel({ settings, onChange, notifier, onCancel }) 
         const next = Object.fromEntries(inputs.map(input => [input.dataset.setting, input.type === 'checkbox' ? input.checked : input.value]));
         const value = onChange(next);
         // Keep an in-progress numeric edit intact, but save valid input before it loses focus.
-        if (event.type === 'change') apply(value);
+        if (event.type === 'change') {
+            apply(value);
+            if (event.target === channel) {
+                deliveryStatus.textContent = '点击“测试通知”检查当前通知方式。';
+                refreshNotificationControls();
+            }
+        }
     };
     element.addEventListener('change', update);
     element.addEventListener('input', update);
-    const permissionStatus = () => {
+    const refreshNotificationControls = () => {
+        const tray = channel.value === 'tray';
+        permissionButton.hidden = tray;
+        if (tray) {
+            permissionHint.textContent = '请保持 SillyTavern Notifier 在本机运行，并通过测试检查酒馆与托盘应用的连接。';
+            return;
+        }
         const state = notifier.permission();
         const labels = {
             granted: '浏览器权限：已允许。请用“测试通知”检查系统投递；允许权限不代表 Windows 一定显示横幅。',
@@ -63,27 +108,26 @@ export function createSettingsPanel({ settings, onChange, notifier, onCancel }) 
             insecure: '桌面通知需要 HTTPS 或 localhost。使用非安全局域网地址时仅显示酒馆内提示。',
         };
         const origin = notifier.details().origin;
-        element.querySelector('.gr-permission').textContent = `${origin ? `当前站点：${origin}。` : ''}${labels[state]} 权限由浏览器保存；localhost 与 127.0.0.1、不同浏览器或配置文件各自独立。`;
-        const button = element.querySelector('[data-action="permission"]');
-        button.disabled = state !== 'default';
-        button.textContent = state === 'granted' ? '浏览器已授权' : '授权桌面通知';
+        permissionHint.textContent = `${origin ? `当前站点：${origin}。` : ''}${labels[state]} 权限由浏览器保存；localhost 与 127.0.0.1、不同浏览器或配置文件各自独立。`;
+        permissionButton.disabled = state !== 'default';
+        permissionButton.textContent = state === 'granted' ? '浏览器已授权' : '授权桌面通知';
     };
-    element.querySelector('[data-action="permission"]').addEventListener('click', async () => {
+    permissionButton.addEventListener('click', async () => {
         await notifier.requestPermission();
-        permissionStatus();
+        refreshNotificationControls();
     });
     element.querySelector('[data-action="test"]').addEventListener('click', async event => {
         const button = event.currentTarget;
         button.disabled = true;
         button.textContent = '正在测试…';
-        try { await notifier.test(); }
-        finally { button.disabled = false; button.textContent = '测试通知'; permissionStatus(); }
+        try { await notifier.test({ notificationChannel: channel.value }); }
+        finally { button.disabled = false; button.textContent = '测试通知'; refreshNotificationControls(); }
     });
     element.querySelector('[data-action="cancel"]').addEventListener('click', onCancel);
-    permissionStatus();
+    refreshNotificationControls();
     return {
         element,
-        refreshPermission: permissionStatus,
+        refreshNotificationControls,
         settingsStatus({ phase, local }) {
             const labels = {
                 pending: local ? '设置已暂存到当前标签页，正在同步到酒馆；现在刷新也可恢复。' : '浏览器本地存储不可用，正在保存到酒馆；请等同步成功后再刷新。',
@@ -93,14 +137,16 @@ export function createSettingsPanel({ settings, onChange, notifier, onCancel }) 
             element.querySelector('.gr-save-status').textContent = labels[phase];
         },
         notificationStatus({ phase }) {
+            if (phase.startsWith('tray-') !== (channel.value === 'tray')) return;
             const labels = {
                 sending: '正在发送桌面通知，等待浏览器显示回执…',
                 shown: '浏览器已确认发出通知。若未看到横幅，请按 Win+N 查看通知中心，并检查 Windows 的勿扰模式和浏览器通知开关。',
                 error: '浏览器报告通知发送失败。请检查当前站点权限，以及 Windows → 设置 → 系统 → 通知中此浏览器的开关。',
                 unconfirmed: '尚未收到浏览器的显示回执。如无通知，请检查 Windows 通知开关和勿扰模式；生成结果会回退为酒馆内提示。',
             };
-            if (labels[phase]) element.querySelector('.gr-notification-status').textContent = labels[phase];
-            permissionStatus();
+            const label = TRAY_MESSAGES[phase] ?? labels[phase];
+            if (label) deliveryStatus.textContent = label;
+            refreshNotificationControls();
         },
         status(value) {
             const labels = {
@@ -116,6 +162,10 @@ export function createSettingsPanel({ settings, onChange, notifier, onCancel }) 
             element.querySelector('.gr-status').textContent = labels[value.phase] ?? '等待下一次生成。';
             element.querySelector('[data-action="cancel"]').disabled = !['preparing', 'generating', 'waiting', 'finishing'].includes(value.phase);
             element.querySelector('.gr-status').classList.toggle('gr-error', value.phase === 'failure');
+            if (value.phase === 'failure') {
+                failureText.textContent = formatFailureDetails(value);
+                failureDetails.hidden = false;
+            }
         },
     };
 }

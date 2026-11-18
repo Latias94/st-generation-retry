@@ -33,6 +33,10 @@
     width: auto;
 }
 
+#generation-retry-settings .gr-actions [hidden] {
+    display: none;
+}
+
 #generation-retry-settings .gr-status,
 #generation-retry-settings .gr-notification-status {
     border-left: 3px solid var(--SmartThemeQuoteColor);
@@ -47,4 +51,22 @@
 
 #generation-retry-settings .gr-error {
     border-left-color: #e87c72;
+}
+
+#generation-retry-settings .gr-failure-details {
+    margin: 8px 0;
+}
+
+#generation-retry-settings .gr-failure-details summary {
+    cursor: pointer;
+}
+
+#generation-retry-settings .gr-failure-details pre {
+    max-height: 16rem;
+    overflow: auto;
+    padding: 8px;
+    background: var(--SmartThemeBlurTintColor);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    user-select: text;
 }

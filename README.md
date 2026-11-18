@@ -10,15 +10,26 @@ Open **Extensions → Install extension**, paste the repository URL, and reload 
 https://github.com/Latias94/st-generation-retry
 ```
 
-Requires SillyTavern 1.13.0 or later. No server plugin, Node package installation, API key, or core patch is needed.
+Requires SillyTavern 1.13.0 or later. The browser notification channel works with the frontend extension alone.
 
-Open **Extensions → 自动重试与通知** to configure the extension. **启用自动重试** and **启用结果通知** are independent switches, both on by default. For notifications without retries, turn off **启用自动重试** and leave **启用结果通知** on; your retry limit and delays are retained. Select **授权桌面通知** to request permission, allow notifications in the browser, and then select **测试通知**. Permission is requested only after that button is pressed. Notification text never includes character names, prompts, reasoning, or reply content.
+Open **Extensions → 自动重试与通知** to configure the extension. **启用自动重试** and **启用结果通知** are independent switches, both on by default. For notifications without retries, turn off **启用自动重试** and leave **启用结果通知** on. Your retry limit and delays are retained. Keep the SillyTavern page open while generating.
 
-Browsers require HTTPS or a localhost origin for desktop notifications. For a local server, use `http://localhost:8000` or `http://127.0.0.1:8000`. A plain HTTP LAN address does not qualify. Enabled final-failure notifications always show an immediate SillyTavern error toast as well as attempting desktop delivery. Success notifications fall back to a SillyTavern toast if permission is denied or unavailable, delivery fails, or no browser receipt arrives within five seconds. Browser and operating system notification settings still control delivery. Keep the SillyTavern page open while generating.
+### Windows tray notifications
 
-The panel identifies the exact current origin. `localhost` and `127.0.0.1`, different ports, and different browser profiles have separate permissions. The extension cannot grant or retain browser permissions itself. Allow notifications for the address actually shown in the panel.
+The tray application submits native notifications under **SillyTavern Notifier**, independently of the browser's site notification and local network permissions. SillyTavern and the tray application run on the same Windows computer under the same Windows user. Use `http://127.0.0.1:8000` or `http://localhost:8000`, with the port used by your SillyTavern installation.
 
-**测试通知** reports progress and then the browser's `show`/`error` event, or a timeout. A `show` receipt confirms the browser accepted the notification; it cannot prove that Windows showed a banner to the user. If the browser reports success but no banner appears, press **Win+N** and check **Windows Settings → System → Notifications → Microsoft Edge / your browser → Show notification banners**, together with Do not disturb. Browser permission and the Windows banner switch must both allow display.
+1. Place [`desktop/st-generation-notifier.mjs`](desktop/st-generation-notifier.mjs) in the `plugins` folder next to SillyTavern's `server.js`. Set `enableServerPlugins: true` in SillyTavern's `config.yaml`, then restart SillyTavern. The `.mjs` file is the entire relay.
+2. Build the tray application with the .NET 10 SDK on Windows. Run `dotnet publish desktop/SillyTavernNotifier.csproj -c Release` from this repository. The default build targets x64. For ARM64, add `-r win-arm64`. The application uses the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) and the [Windows App Runtime 1.8](https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads). Use the current servicing release for your architecture.
+3. Start `SillyTavernNotifier.exe` in the `publish` directory as a regular user. Keep the files in that directory together. Double-click the tray icon to open settings. The tray menu can pause results, send a test, or exit. Closing settings leaves the tray application running.
+4. In the enabled frontend extension, set **通知方式** to **Windows 托盘应用** and click **测试通知**. The tray app's own test checks Windows delivery. The SillyTavern test also checks the server relay.
+
+When Windows accepts the notification, the extension and the tray window report that receipt. **Windows Settings → System → Notifications** controls the app's notification switch and banner visibility. Do not disturb can suppress banners. Press **Win+N** to check the notification center. If the app is paused, results are skipped and the test still works. If delivery fails or the app is offline, SillyTavern shows the result in the page. Final failures also appear in the page immediately.
+
+The extension sends an event ID, outcome, retry count, and optional failure code, HTTP status, and partial-output flag to SillyTavern's same-origin plugin route. The route uses SillyTavern's existing session and CSRF checks and accepts loopback requests. It forwards the event over a user-scoped Windows named pipe. Notification text contains no character names, prompts, reasoning, or reply content.
+
+### Browser notifications
+
+For **浏览器通知**, use HTTPS or a loopback address. Select **授权桌面通知** to request permission, allow notifications for the address shown in the panel, then select **测试通知**. `localhost` and `127.0.0.1`, different ports, and different browser profiles have separate permissions. The browser test reports the browser's display receipt, an error, or a timeout. If the browser reports success and no banner appears, check the browser's notification entry in Windows and the Do not disturb setting. Failed delivery falls back to a SillyTavern toast.
 
 ## Settings
 
@@ -26,6 +37,7 @@ The panel identifies the exact current origin. `localhost` and `127.0.0.1`, diff
 | --- | --- | --- |
 | Enable automatic retry | On | Retries temporary native Chat Completion failures. Turning this off still allows result notifications. |
 | Enable result notifications | On | Sends the selected success/failure notifications, independently of automatic retry. Turning this off also disables result toasts; the explicit test button still works. |
+| Notification channel | Browser | Choose browser notifications or the Windows tray application. |
 | Maximum retries | 3 | Additional attempts after the original request; range 0–10. Applies only when automatic retry is on; 0 also disables retries. |
 | Initial delay | 2 seconds | Delay before the first retry; range 1–300 seconds. |
 | Exponential backoff | On | Doubles the delay for each retry. |
@@ -37,7 +49,9 @@ The panel identifies the exact current origin. `localhost` and `127.0.0.1`, diff
 
 The status area displays preparation, active requests, retry delays, and the final result. **停止本次生成 / 重试** cancels the generation and any pending retry. The native SillyTavern stop button works as well. Manual cancellation sends no success or failure notification.
 
-Each final failure also writes one `[Generation Retry] Generation failed.` error to the **browser developer console**, including the generation ID, error code, HTTP status when available, partial-output flag, and retry count. This diagnostic does not depend on notification preferences and contains no upstream error text, prompts, reply content, URLs, or credentials. Recovered attempts and manual cancellation do not log a final failure. The extension does not write to the SillyTavern server terminal. Server messages such as `Streaming request in progress` and `Streaming request finished` describe stream forwarding, not successful generation: an HTTP 200 stream may contain an error frame or end without a completion marker, which the extension detects in the browser.
+Expand **最近一次失败详情** under **Extensions → 自动重试与通知** to inspect or copy the latest failure. The pane shows the HTTP status and content type when available, the original parser, network, or tool error, and the response body or SSE data that reached the browser. Long excerpts are capped at 16,384 characters and marked as truncated. The latest failure stays in the current tab until reload or a newer failure. For non-streaming requests, some SillyTavern backends send a generic error to the browser and print the provider's original error in the server terminal.
+
+Each final failure also writes one `[Generation Retry] Generation failed.` entry to the **browser developer console**, with the generation ID, error code, HTTP status when available, partial-output flag, and retry count. The console entry and desktop notifications carry summaries. The failure detail pane and console entry are available independently of notification preferences. Server messages such as `Streaming request finished` also appear when a stream contains an error frame or ends without a completion marker, which the extension detects in the browser.
 
 Settings are saved in SillyTavern's user settings. Valid input is also recorded immediately as a pending patch in `sessionStorage`, scoped to the current tab, origin, and SillyTavern account, so refreshing before the native debounced save completes does not discard the edit. The patch contains only changed extension options; it is replayed on reload and removed after a matching server readback. Tabs keep independent pending patches. The panel distinguishes temporary tab storage, pending synchronization, and confirmed server storage. Wait for confirmation before closing the tab. If browser storage is blocked, it warns that synchronization must finish before reloading. Changes to retry options take effect on the next request; notification options are checked when generation finishes. Turning both switches off also stops the extension's active generation. The old combined switch migrates to both independent switches, preserving its on/off state and all existing retry and notification preferences.
 

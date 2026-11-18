@@ -1,6 +1,18 @@
 import { abortError, GenerationFailure, networkFailure, responseFailure, retryDelay, waitForRetry } from './policy.js';
 import { inspectPayload, StreamInspector } from './stream.js';
 
+async function readHttpFailure(response) {
+    let body, data, message;
+    try {
+        body = await response.text();
+        data = JSON.parse(body);
+    } catch (error) {
+        if (body === undefined) message = String(error);
+    }
+    const failure = responseFailure(data, response.status) ?? new GenerationFailure('upstream-error', { status: response.status });
+    return failure.addDetail({ body, message });
+}
+
 /** Retry the same serialized request, never the Generate() call or its side effects. */
 export async function requestWithRetry(fetcher, input, init, payload, session, { sleep = waitForRetry } = {}) {
     const { settings } = session;
@@ -27,16 +39,51 @@ export async function requestWithRetry(fetcher, input, init, payload, session, {
         settle(failure.name === 'AbortError' ? 'cancelled' : 'failure', failure);
         return failure;
     };
-    const retry = async (error, retryAfter, partial = false) => {
+    const retry = async (error, response, partial = false) => {
         check();
         const failure = networkFailure(error);
+        if (failure.name === 'AbortError') throw failure;
         failure.partial ||= partial;
-        if (!settings.retryEnabled || failure.name === 'AbortError' || partial || !failure.retryable || retries >= settings.maxRetries) throw failure;
-        const milliseconds = retryDelay(settings, ++retries, retryAfter);
+        if (response) failure.addDetail({ httpStatus: response.status, statusText: response.statusText,
+            contentType: response.headers.get('content-type') });
+        if (!settings.retryEnabled || partial || !failure.retryable || retries >= settings.maxRetries) throw failure;
+        const milliseconds = retryDelay(settings, ++retries, response?.headers.get('retry-after'));
         session.onRetry({ retry: retries, milliseconds, code: failure.code, status: failure.status });
         await sleep(milliseconds, controller.signal);
         check();
     };
+
+    const isSse = async response => {
+        const contentType = response.headers.get('content-type');
+        if (contentType) return contentType.split(';', 1)[0].trim().toLowerCase() === 'text/event-stream';
+        if (!response.body) return true;
+
+        // SillyTavern can pipe upstream bodies without forwarding Content-Type.
+        // Peek at a bounded prefix to recognize JSON and HTML error bodies without buffering SSE.
+        reader = response.clone().body.getReader();
+        const decoder = new TextDecoder();
+        try {
+            let remaining = 1024;
+            while (remaining > 0) {
+                const { done, value } = await reader.read();
+                check();
+                if (done) break;
+                const first = decoder.decode(value.subarray(0, remaining), { stream: true }).trimStart()[0];
+                if (first) return first !== '{' && first !== '[' && first !== '<';
+                remaining -= value.byteLength;
+            }
+            return true;
+        } catch (error) {
+            void response.body.cancel().catch(() => {});
+            throw error;
+        } finally {
+            // The clone's cancellation can stay pending while the original body is in use.
+            void reader.cancel().catch(() => {});
+            reader.releaseLock();
+            reader = null;
+        }
+    };
+
     const open = async () => {
         while (true) {
             let response;
@@ -45,30 +92,26 @@ export async function requestWithRetry(fetcher, input, init, payload, session, {
                 session.onAttempt?.();
                 response = await fetcher(input, { ...init, signal: controller.signal });
                 check();
-                if (!response.ok) {
-                    let data;
-                    try { data = await response.json(); } catch { /* The HTTP status is sufficient. */ }
-                    throw responseFailure(data, response.status);
-                }
-                const isSse = response.headers.get('content-type')?.includes('text/event-stream');
-                if (!payload.stream || !isSse) {
-                    // Keep one body for the caller; avoid teeing a potentially long lived SSE stream.
+                if (!response.ok) throw await readHttpFailure(response);
+                if (!payload.stream || !await isSse(response)) {
                     const bytes = await response.arrayBuffer();
                     check();
-                    let data;
-                    try { data = JSON.parse(new TextDecoder().decode(bytes)); }
-                    catch { throw new GenerationFailure('invalid-response', { retryable: true }); }
-                    const inspection = inspectPayload(data);
-                    if (inspection.failure) throw inspection.failure;
-                    if (payload.stream) throw new GenerationFailure('expected-stream', { retryable: true });
-                    if (!inspection.output && settings.retryEmpty) throw new GenerationFailure('empty-response', { retryable: true });
+                    const body = new TextDecoder().decode(bytes);
+                    let inspection;
+                    try { inspection = inspectPayload(JSON.parse(body)); }
+                    catch (error) {
+                        throw new GenerationFailure('invalid-response', { retryable: true, detail: { body, message: String(error) } });
+                    }
+                    if (inspection.failure) throw inspection.failure.addDetail({ body });
+                    if (payload.stream) throw new GenerationFailure('expected-stream', { retryable: true, detail: { body } });
+                    if (!inspection.output && settings.retryEmpty) throw new GenerationFailure('empty-response', { retryable: true, detail: { body } });
                     settle('success', { toolCalls: inspection.toolCalls });
                     return new Response(bytes, { status: response.status, statusText: response.statusText, headers: response.headers });
                 }
                 if (!response.body) throw new GenerationFailure('empty-response', { retryable: true });
                 return response;
             } catch (error) {
-                await retry(error, response?.headers.get('retry-after'));
+                await retry(error, response);
             }
         }
     };
@@ -113,8 +156,13 @@ export async function requestWithRetry(fetcher, input, init, payload, session, {
                     }
                 } catch (error) {
                     // Do not replay reasoning, text, images, or tool calls after any has reached the caller.
+                    if (error instanceof GenerationFailure && error.detail?.body === undefined && prefix.length) {
+                        const decoder = new TextDecoder();
+                        const body = prefix.map(bytes => decoder.decode(bytes, { stream: true })).join('') + decoder.decode();
+                        error.addDetail({ body });
+                    }
                     await reader.cancel().catch(() => {});
-                    await retry(error, response.headers.get('retry-after'), committed);
+                    await retry(error, response, committed);
                 } finally {
                     await reader.cancel().catch(() => {});
                     reader.releaseLock();

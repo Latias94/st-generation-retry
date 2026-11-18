@@ -83,6 +83,33 @@ test('handles a transient error envelope in HTTP 200 and invalid JSON responses'
     assert.equal(harness.calls.length, 3);
 });
 
+test('retains the original response when SillyTavern sends invalid JSON', async () => {
+    const body = '<html>Proxy error reference: example-502</html>\n';
+    const harness = setup([new Response(body, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })], { maxRetries: 0 });
+    await assert.rejects(harness.run(), { code: 'invalid-response' });
+    const [[outcome, failure]] = harness.results;
+    assert.equal(outcome, 'failure');
+    assert.equal(failure.detail?.body, body);
+    assert.equal(failure.detail.contentType, 'text/html; charset=utf-8');
+    assert.equal(failure.detail.httpStatus, 200);
+    assert.match(failure.detail.message, /JSON/);
+});
+
+test('keeps a bounded excerpt of the final HTTP error response after retries', async () => {
+    const body = 'Original gateway diagnostic.\n'.repeat(1000);
+    const harness = setup([
+        new Response('Earlier attempt', { status: 503 }),
+        new Response(body, { status: 502, statusText: 'Bad Gateway' }),
+    ], { maxRetries: 1 });
+    await assert.rejects(harness.run(), { code: 'upstream-error', status: 502 });
+    const [[outcome, failure]] = harness.results;
+    assert.equal(outcome, 'failure');
+    assert.equal(failure.detail.httpStatus, 502);
+    assert.equal(failure.detail.statusText, 'Bad Gateway');
+    assert.equal(failure.detail.body, body.slice(0, 16 * 1024));
+    assert.equal(failure.detail.truncated, true);
+});
+
 test('can retry an empty reply, but never replays a tool call or reasoning-only response', async () => {
     const empty = setup([Response.json({ choices: [] }), ok()]);
     await empty.run();
@@ -128,6 +155,24 @@ test('streams bytes unchanged and recognizes a finish marker without DONE', asyn
     const harness = setup([response]);
     assert.equal(await (await harness.run(true)).text(), raw);
     assert.deepEqual(harness.results.map(x => x[0]), ['success']);
+});
+
+test('streams SillyTavern responses that omit Content-Type', async () => {
+    const raw = textFrame('complete') + endFrame;
+    const harness = setup([new Response(sse(raw).body)], { maxRetries: 0 });
+    assert.equal(await (await harness.run(true)).text(), raw);
+    assert.equal(harness.calls.length, 1);
+    assert.deepEqual(harness.results.map(x => x[0]), ['success']);
+});
+
+test('recognizes a JSON rejection during streaming with or without Content-Type', async () => {
+    const rejected = () => Response.json({ error: { code: 'invalid_api_key' } });
+    for (const response of [rejected(), new Response(rejected().body)]) {
+        const harness = setup([response, sse(textFrame('should not retry'), endFrame)]);
+        await assert.rejects(async () => (await harness.run(true)).text(), { code: 'request-rejected' });
+        assert.equal(harness.calls.length, 1);
+        assert.deepEqual(harness.results.map(x => x[0]), ['failure']);
+    }
 });
 
 test('retries an in-band SSE error before output, suppressing failed frames', async () => {
